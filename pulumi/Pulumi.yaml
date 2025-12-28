@@ -1,0 +1,7 @@
+name: fognode-infrastructure
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Infrastructure as Code para FogNode Audiobooks - Serverless + Fog Computing
+

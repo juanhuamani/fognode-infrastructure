@@ -1,24 +1,17 @@
-# Terraform
-*.tfstate
-*.tfstate.*
-*.tfvars
-!terraform.tfvars.example
-.terraform/
-.terraform.lock.hcl
-crash.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
+# Pulumi
+pulumi/venv/
+pulumi/.pulumi/
+*.pyc
+__pycache__/
 
-# Archivos temporales
-tmp/
-*.zip
+# Secretos (mantener Pulumi.dev.yaml como ejemplo)
+# Pulumi.*.yaml
+*.env
+.env*
+credentials*.json
 
-# Credenciales
-credentials.json
-*.pem
-*.key
+# Cloud Functions builds
+cloud-functions/**/*.zip
 
 # IDE
 .idea/
@@ -30,9 +23,5 @@ credentials.json
 .DS_Store
 Thumbs.db
 
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
+# Logs
+*.log

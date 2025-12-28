@@ -1,0 +1,8 @@
+config:
+  gcp:project: mycloud-jhuamaniv
+  gcp:region: us-central1
+  fognode:environment: dev
+  fognode:bucket_name: fognode-audiobooks
+  fognode:cleanup_schedule: "0 2 * * *"
+  fognode:stats_schedule: "0 8 * * *"
+encryptionsalt: v1:S0upc8mGpU4=:v1:EOB37p2/VQJjnEw9:mX7lkU/9+mphJ3VAQ4MQArm/bRLDhw==
