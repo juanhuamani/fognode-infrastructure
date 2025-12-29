@@ -55,25 +55,43 @@ for api in apis:
 # =============================================================================
 # Cloud Storage - Bucket para archivos de audio
 # =============================================================================
+# NOTA IMPORTANTE: Este bucket DEBE ser creado primero por fog_node/infra/
+# Aquí solo usamos su nombre para referenciarlo, NO lo creamos.
+# 
+# El nombre del bucket debe coincidir exactamente con el creado en:
+# fog_node/infra/__main__.py línea 64: name=f"fognode-audiobooks-{project}"
 
-audio_bucket = gcp.storage.Bucket(
-    "audiobooks-bucket",
-    name=f"{BUCKET_NAME}-{PROJECT_ID}",
-    location=REGION,
-    force_destroy=False,
-    uniform_bucket_level_access=True,
-    versioning=gcp.storage.BucketVersioningArgs(enabled=False),
-    lifecycle_rules=[
-        gcp.storage.BucketLifecycleRuleArgs(
-            condition=gcp.storage.BucketLifecycleRuleConditionArgs(age=90),
-            action=gcp.storage.BucketLifecycleRuleActionArgs(type="Delete"),
-        )
-    ],
-    labels={
-        "environment": ENVIRONMENT,
-        "project": "fognode-audiobooks",
-    },
-)
+# Nombre del bucket existente (debe coincidir con fog_node/infra/)
+EXISTING_BUCKET_NAME = f"fognode-audiobooks-{PROJECT_ID}"
+
+# Crear un objeto simple que simula el bucket para usar en referencias
+# Esto evita crear un bucket duplicado - solo usamos el nombre
+class BucketReference:
+    def __init__(self, name):
+        self.name = Output.from_input(name)
+        self.url = Output.from_input(f"gs://{name}")
+
+audio_bucket = BucketReference(EXISTING_BUCKET_NAME)
+
+# Si el bucket no existe aún, descomenta esto para crearlo:
+# audio_bucket = gcp.storage.Bucket(
+#     "audiobooks-bucket",
+#     name=f"fognode-audiobooks-{PROJECT_ID}",
+#     location=REGION,
+#     force_destroy=False,
+#     uniform_bucket_level_access=True,
+#     versioning=gcp.storage.BucketVersioningArgs(enabled=False),
+#     lifecycle_rules=[
+#         gcp.storage.BucketLifecycleRuleArgs(
+#             condition=gcp.storage.BucketLifecycleRuleConditionArgs(age=90),
+#             action=gcp.storage.BucketLifecycleRuleActionArgs(type="Delete"),
+#         )
+#     ],
+#     labels={
+#         "environment": ENVIRONMENT,
+#         "project": "fognode-audiobooks",
+#     },
+# )
 
 # =============================================================================
 # Firestore - Base de datos NoSQL
