@@ -11,6 +11,7 @@ Este script define toda la infraestructura serverless en GCP:
 
 import pulumi
 import pulumi_gcp as gcp
+import pulumi_docker as docker
 from pulumi import Config, export, Output
 
 # =============================================================================
@@ -40,7 +41,7 @@ apis = [
     "pubsub.googleapis.com",
     "run.googleapis.com",
     "eventarc.googleapis.com",
-    "artifactregistry.googleapis.com",  # Requerido para Cloud Functions v2
+    "artifactregistry.googleapis.com",  # Requerido para Cloud Functions v2 y Docker images
 ]
 
 enabled_apis = []
@@ -280,6 +281,146 @@ stats_scheduler = gcp.cloudscheduler.Job(
 )
 
 # =============================================================================
+# Artifact Registry - Repository para imágenes Docker del Fog Node
+# =============================================================================
+
+docker_repo = gcp.artifactregistry.Repository(
+    "fognode-docker-repo",
+    repository_id="fognode",
+    location=REGION,
+    format="DOCKER",
+    description="Docker images for FogNode API",
+    opts=pulumi.ResourceOptions(depends_on=enabled_apis),
+)
+
+# =============================================================================
+# Service Account - Para Fog Node API en Cloud Run
+# =============================================================================
+
+fognode_api_sa = gcp.serviceaccount.Account(
+    "fognode-api-service-account",
+    account_id="fognode-api",
+    display_name="FogNode API Service Account",
+    description="Service account for FogNode Cloud Run API service",
+)
+
+# IAM: Storage Object Admin para el bucket
+fognode_storage_iam = gcp.storage.BucketIAMBinding(
+    "fognode-api-storage-iam",
+    bucket=audio_bucket.name,
+    role="roles/storage.objectAdmin",
+    members=[fognode_api_sa.email.apply(lambda email: f"serviceAccount:{email}")],
+)
+
+# IAM: Firestore User
+fognode_firestore_iam = gcp.projects.IAMMember(
+    "fognode-api-firestore-iam",
+    project=PROJECT_ID,
+    role="roles/datastore.user",
+    member=fognode_api_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+
+# =============================================================================
+# Build & Push Docker Image del Fog Node
+# =============================================================================
+
+# Docker image name en Artifact Registry
+fognode_image_name = Output.concat(
+    REGION,
+    "-docker.pkg.dev/",
+    PROJECT_ID,
+    "/",
+    docker_repo.repository_id,
+    "/fognode-api:latest",
+)
+
+# Construir y subir imagen Docker
+# Nota: Requiere Docker instalado y autenticado con gcloud
+fognode_app_image = docker.Image(
+    "fognode-api-image",
+    image_name=fognode_image_name,
+    build=docker.DockerBuildArgs(
+        context="../../fog_node",  # Ruta relativa desde pulumi/ al directorio fog_node
+        dockerfile="../../fog_node/Dockerfile",
+        platform="linux/amd64",
+    ),
+    registry=docker.RegistryArgs(
+        server=Output.concat(REGION, "-docker.pkg.dev"),
+    ),
+    opts=pulumi.ResourceOptions(depends_on=[docker_repo]),
+)
+
+# =============================================================================
+# Cloud Run Service - Fog Node API
+# =============================================================================
+
+fognode_api_service = gcp.cloudrunv2.Service(
+    "fognode-api-service",
+    name="fognode-api",
+    location=REGION,
+    template=gcp.cloudrunv2.ServiceTemplateArgs(
+        service_account=fognode_api_sa.email,
+        containers=[
+            gcp.cloudrunv2.ServiceTemplateContainerArgs(
+                image=fognode_app_image.image_name,
+                ports=[
+                    gcp.cloudrunv2.ServiceTemplateContainerPortArgs(
+                        container_port=8000,
+                    ),
+                ],
+                resources=gcp.cloudrunv2.ServiceTemplateContainerResourcesArgs(
+                    limits={
+                        "cpu": "2",
+                        "memory": "2Gi",
+                    },
+                ),
+                envs=[
+                    gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                        name="GCP_PROJECT_ID",
+                        value=PROJECT_ID,
+                    ),
+                    gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                        name="BUCKET_NAME",
+                        value=audio_bucket.name,
+                    ),
+                    gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                        name="ENV_MODE",
+                        value="production",
+                    ),
+                    # Sobrescribir GOOGLE_APPLICATION_CREDENTIALS para que use Application Default Credentials
+                    # En Cloud Run, las credenciales se obtienen automáticamente del Service Account asignado
+                    gcp.cloudrunv2.ServiceTemplateContainerEnvArgs(
+                        name="GOOGLE_APPLICATION_CREDENTIALS",
+                        value="",  # Vacío para forzar uso de ADC del Service Account
+                    ),
+                ],
+            ),
+        ],
+        scaling=gcp.cloudrunv2.ServiceTemplateScalingArgs(
+            min_instance_count=0,
+            max_instance_count=10,
+        ),
+    ),
+    opts=pulumi.ResourceOptions(
+        depends_on=[
+            fognode_api_sa,
+            fognode_storage_iam,
+            fognode_firestore_iam,
+            fognode_app_image,
+        ]
+    ),
+)
+
+# Hacer el servicio Cloud Run público
+fognode_api_iam = gcp.cloudrunv2.ServiceIamBinding(
+    "fognode-api-public-access",
+    name=fognode_api_service.name,
+    location=REGION,
+    role="roles/run.invoker",
+    members=["allUsers"],  # Hacerlo público
+)
+
+# =============================================================================
 # Exports - Valores de salida
 # =============================================================================
 
@@ -290,6 +431,8 @@ export("stats_function_url", stats_function.service_config.uri)
 export("cleanup_scheduler", cleanup_scheduler.name)
 export("stats_scheduler", stats_scheduler.name)
 export("functions_service_account", functions_sa.email)
+export("fognode_api_url", fognode_api_service.uri)
+export("fognode_api_service_account", fognode_api_sa.email)
 
 # Resumen de arquitectura
 export("architecture_summary", Output.concat(
@@ -307,7 +450,7 @@ export("architecture_summary", Output.concat(
     "║  └── Cloud Scheduler: stats-daily                                ║\n",
     "║                                                                  ║\n",
     "║  🌫️  FOG COMPUTING                                               ║\n",
-    "║  └── Docker Container: fog_node (localhost:8000)                 ║\n",
+    "║  └── Cloud Run: fognode-api (", fognode_api_service.uri, ")  ║\n",
     "║                                                                  ║\n",
     "╚══════════════════════════════════════════════════════════════════╝\n",
 ))
